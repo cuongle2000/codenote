@@ -11,10 +11,41 @@
       http-equiv="X-Content-Security-Policy"
       content="default-src 'self'; script-src 'self'"
     />
-    <title>Hello from Electron renderer!</title>
+    <title>CodeNote - Multi-Tab Editor</title>
+    <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <h1>Hello from Electron renderer!</h1>
-    <p>👋</p>
+    <div id="app">
+      <!-- Sidebar with file explorer -->
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <span id="currentPath">projects</span>
+          <div style="display: inline-block; float: right;">
+            <button id="newFileBtn" title="New File">📄</button>
+            <button id="newFolderBtn" title="New Folder">📁</button>
+          </div>
+        </div>
+        <div class="file-tree" id="fileTree"></div>
+      </div>
+
+      <!-- Main content area -->
+      <div class="main-content">
+        <!-- Tab bar -->
+        <div class="tab-bar" id="tabBar"></div>
+        
+        <!-- Editor area -->
+        <div class="editor-container">
+          <textarea class="editor" id="editor" spellcheck="false"></textarea>
+        </div>
+        
+        <!-- Status bar -->
+        <div class="status-bar">
+          <div id="statusText">Ready</div>
+          <div id="cursorPosition">Ln 1, Col 1</div>
+        </div>
+      </div>
+    </div>
+    
+    <script src="./renderer.js"></script>
   </body>
 </html>

@@ -1,0 +1,362 @@
+// Import electron API
+const { saveFile, openFile, readDir, createFile, createDirectory } = window.electronAPI
+
+// DOM Elements
+const fileTree = document.getElementById('fileTree')
+const tabBar = document.getElementById('tabBar')
+const editor = document.getElementById('editor')
+const statusText = document.getElementById('statusText')
+const cursorPosition = document.getElementById('cursorPosition')
+const newFileBtn = document.getElementById('newFileBtn')
+const newFolderBtn = document.getElementById('newFolderBtn')
+const currentPathDisplay = document.getElementById('currentPath')
+
+// State
+let tabs = []
+let activeTabId = null
+let fileSystemCache = {}
+let currentPath = 'projects'
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', () => {
+  // Load initial file tree (only projects directory)
+  loadFileSystem('projects')
+  
+  // Set up event listeners
+  setupEventListeners()
+})
+
+// Set up event listeners
+function setupEventListeners() {
+  // Tab close button click
+  tabBar.addEventListener('click', (e) => {
+    if (e.target.classList.contains('tab-close')) {
+      const tabId = e.target.closest('.tab').dataset.tabId
+      closeTab(tabId)
+    }
+  })
+  
+  // Tab click to switch
+  tabBar.addEventListener('click', (e) => {
+    if (e.target.classList.contains('tab') || e.target.parentElement.classList.contains('tab')) {
+      const tabElement = e.target.classList.contains('tab') ? e.target : e.target.parentElement
+      const tabId = tabElement.dataset.tabId
+      activateTab(tabId)
+    }
+  })
+  
+  // Editor input for cursor position
+  editor.addEventListener('input', updateCursorPosition)
+  editor.addEventListener('click', updateCursorPosition)
+  editor.addEventListener('keyup', updateCursorPosition)
+  
+  // Save shortcut (Ctrl+S)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 's') {
+      e.preventDefault()
+      saveActiveTab()
+    }
+  })
+  
+  // New file button
+  newFileBtn.addEventListener('click', createNewFile)
+  
+  // New folder button
+  newFolderBtn.addEventListener('click', createNewDirectory)
+}
+
+// Load file system structure
+async function loadFileSystem(dirPath) {
+  try {
+    // Store current path
+    currentPath = dirPath
+    
+    // Update current path display
+    updateCurrentPathDisplay()
+    
+    console.log('Loading directory:', dirPath);
+    const files = await readDir(dirPath)
+    console.log('Files loaded:', files);
+    fileSystemCache[dirPath] = files
+    renderFileTree(files, dirPath)
+  } catch (error) {
+    console.error('Error loading file system:', error)
+    statusText.textContent = 'Error loading file system: ' + error.message
+  }
+}
+}
+}
+
+// Update current path display in UI
+function updateCurrentPathDisplay() {
+  if (currentPathDisplay) {
+    // Show only the last part of the path for brevity
+    const pathParts = currentPath.split('/')
+    const displayName = pathParts[pathParts.length - 1] || 'projects'
+    currentPathDisplay.textContent = displayName
+  }
+}
+
+// Render file tree
+function renderFileTree(files, path) {
+  fileTree.innerHTML = ''
+  
+  // Add parent directory ".." at the top if not at root
+  if (path !== 'projects') {
+    const parentItem = document.createElement('div')
+    parentItem.className = 'file-item folder'
+    parentItem.textContent = '..'
+    parentItem.dataset.path = path
+    parentItem.addEventListener('click', () => goToParentDirectory(path))
+    fileTree.appendChild(parentItem)
+  }
+  
+  // Sort files: folders first, then files
+  const sortedFiles = files.sort((a, b) => {
+    if (a.isDirectory && !b.isDirectory) return -1
+    if (!a.isDirectory && b.isDirectory) return 1
+    return a.name.localeCompare(b.name)
+  })
+  
+  sortedFiles.forEach(file => {
+    const item = document.createElement('div')
+    item.className = `file-item ${file.isDirectory ? 'folder' : 'file'}`
+    item.textContent = file.name
+    item.dataset.path = file.path
+    
+    if (file.isDirectory) {
+      item.addEventListener('click', () => expandFolder(file))
+    } else {
+      item.addEventListener('click', () => openFileInTab(file.path))
+    }
+    
+    fileTree.appendChild(item)
+  })
+}
+
+// Go to parent directory
+function goToParentDirectory(currentPath) {
+  const pathParts = currentPath.split('/')
+  if (pathParts.length > 1) {
+    pathParts.pop() // Remove last part
+    const parentPath = pathParts.join('/')
+    loadFileSystem(parentPath)
+  } else {
+    // At root, go back to projects
+    loadFileSystem('projects')
+  }
+}
+
+// Expand folder (simplified for now)
+async function expandFolder(folder) {
+  try {
+    const files = await readDir(folder.path)
+    fileSystemCache[folder.path] = files
+    renderFileTree(files, folder.path)
+  } catch (error) {
+    console.error('Error expanding folder:', error)
+  }
+}
+
+// Open file in a new tab
+async function openFileInTab(filePath) {
+  // Check if file is already open
+  const existingTab = tabs.find(tab => tab.path === filePath)
+  if (existingTab) {
+    activateTab(existingTab.id)
+    return
+  }
+  
+  try {
+    const content = await openFile(filePath)
+    const fileName = filePath.split('/').pop()
+    
+    // Create new tab
+    const tabId = Date.now().toString()
+    const tab = {
+      id: tabId,
+      name: fileName,
+      path: filePath,
+      content: content,
+      isDirty: false
+    }
+    
+    tabs.push(tab)
+    renderTabs()
+    activateTab(tabId)
+    
+    statusText.textContent = `Opened: ${fileName}`
+  } catch (error) {
+    console.error('Error opening file:', error)
+    statusText.textContent = `Error opening file: ${error.message}`
+  }
+}
+
+// Create a new file
+async function createNewFile() {
+  try {
+    // Use Electron's save dialog to get file path
+    const result = await window.electronAPI.showSaveDialog({
+      filters: [{ name: 'All Files', extensions: ['*'] }],
+      defaultPath: `${currentPath}/new-file.txt`
+    })
+    
+    if (result.canceled) return
+    
+    const filePath = result.filePath
+    
+    await createFile(filePath)
+    
+    // Open the new file
+    openFileInTab(filePath)
+    
+    statusText.textContent = `Created new file: ${filePath}`
+    // Refresh file tree
+    loadFileSystem(currentPath)
+  } catch (error) {
+    console.error('Error creating file:', error)
+    statusText.textContent = `Error creating file: ${error.message}`
+  }
+}
+
+// Create a new directory
+async function createNewDirectory() {
+  try {
+    // Use Electron's open dialog to get directory path
+    const result = await window.electronAPI.showOpenDialog({
+      properties: ['openDirectory'],
+      defaultPath: currentPath
+    })
+    
+    if (result.canceled || result.filePaths.length === 0) return
+    
+    // For simplicity, we'll use the selected directory path directly
+    // In a real app, we'd want to prompt for a subdirectory name
+    const dirPath = result.filePaths[0]
+    
+    await createDirectory(dirPath)
+    
+    statusText.textContent = `Created new directory: ${dirPath}`
+    // Refresh file tree
+    loadFileSystem(currentPath)
+  } catch (error) {
+    console.error('Error creating directory:', error)
+    statusText.textContent = `Error creating directory: ${error.message}`
+  }
+}
+}
+
+// Render all tabs
+function renderTabs() {
+  tabBar.innerHTML = ''
+  
+  tabs.forEach(tab => {
+    const tabElement = document.createElement('div')
+    tabElement.className = `tab ${tab.id === activeTabId ? 'active' : ''}`
+    tabElement.dataset.tabId = tab.id
+    
+    const tabName = tab.isDirty ? `${tab.name}*` : tab.name
+    tabElement.innerHTML = `
+      ${tabName}
+      <span class="tab-close">×</span>
+    `
+    
+    tabBar.appendChild(tabElement)
+  })
+}
+
+// Activate a tab
+function activateTab(tabId) {
+  activeTabId = tabId
+  const tab = tabs.find(t => t.id === tabId)
+  
+  if (tab) {
+    editor.value = tab.content
+    editor.focus()
+    renderTabs()
+    updateCursorPosition()
+    statusText.textContent = `Editing: ${tab.name}`
+  }
+}
+
+// Close a tab
+function closeTab(tabId) {
+  const tabIndex = tabs.findIndex(tab => tab.id === tabId)
+  if (tabIndex === -1) return
+  
+  const tab = tabs[tabIndex]
+  
+  // If tab is dirty, confirm closing
+  if (tab.isDirty) {
+    const confirmed = confirm(`Save changes to ${tab.name}?`)
+    if (confirmed) {
+      saveTab(tabId)
+    }
+  }
+  
+  // Remove tab
+  tabs.splice(tabIndex, 1)
+  
+  // If we closed the active tab
+  if (tabId === activeTabId) {
+    activeTabId = null
+    if (tabs.length > 0) {
+      // Activate last tab or first tab
+      const newActiveTab = tabs[tabs.length - 1]
+      activateTab(newActiveTab.id)
+    } else {
+      // No tabs left
+      editor.value = ''
+      statusText.textContent = 'No active file'
+    }
+  }
+  
+  renderTabs()
+}
+
+// Save active tab
+async function saveActiveTab() {
+  if (!activeTabId) return
+  
+  const tab = tabs.find(t => t.id === activeTabId)
+  if (tab) {
+    await saveTab(activeTabId)
+    statusText.textContent = `Saved: ${tab.name}`
+  }
+}
+
+// Save a specific tab
+async function saveTab(tabId) {
+  const tab = tabs.find(t => t.id === tabId)
+  if (!tab) return
+  
+  try {
+    await saveFile(tab.path, tab.content)
+    tab.isDirty = false
+    renderTabs()
+    updateCursorPosition()
+  } catch (error) {
+    console.error('Error saving file:', error)
+    statusText.textContent = `Error saving file: ${error.message}`
+  }
+}
+
+// Update cursor position indicator
+function updateCursorPosition() {
+  const lines = editor.value.substring(0, editor.selectionStart).split('\n')
+  const lineNumber = lines.length
+  const columnNumber = lines[lines.length - 1].length + 1
+  cursorPosition.textContent = `Ln ${lineNumber}, Col ${columnNumber}`
+}
+
+// Handle editor content change
+editor.addEventListener('input', () => {
+  if (activeTabId) {
+    const tab = tabs.find(t => t.id === activeTabId)
+    if (tab) {
+      tab.content = editor.value
+      tab.isDirty = true
+      renderTabs()
+    }
+  }
+})
